@@ -351,5 +351,5 @@ def process_video_feed(video_path):
 
 
 if __name__ == "__main__":
-    video_path = "data/perception.mp4"
+    video_path = "./data/perception.mp4"
     process_video_feed(video_path)
