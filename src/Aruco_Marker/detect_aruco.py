@@ -18,7 +18,7 @@ while True:
 
     # aruco 마커 감지
     corners, ids, rejected = aruco.detectMarkers(gray, aruco_dict, parameters=parameters)
-
+    
     # 감지된 마커 그리기
     if ids is not None:
         frame = aruco.drawDetectedMarkers(frame, corners, ids)
