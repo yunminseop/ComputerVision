@@ -7,7 +7,7 @@ class Conversion:
         self.__h_res = h_res
         self.__inch = inch
 
-        self.__PPI = np.sqrt(np.pow(self.__w_res, 2)+np.pow(self.__h_res, 2))/self.__inch
+        self.__PPI = np.sqrt(np.power(self.__w_res, 2)+np.power(self.__h_res, 2))/self.__inch
 
     def p2cm(self):
         return  2.54 / self.__PPI
@@ -23,22 +23,25 @@ class GetIntersection:
         x0, y0 = self.fixed_point
         x1, y1 = target_point
 
+        if y1 >= 640:
+            y1 = 639
+            
         # slope
         self.m = (y1 - y0) / (x1 - x0) if x1 != x0 else float('inf')  # x1 == x0일 경우 수직선
         
         # y_intersection
         self.c = y0 - self.m * x0
 
-    def change_derivative(self):
-        self.m = 2
-        print(self.m)
-
     def calculate_intersection(self):
         """get an intersection"""
+
+        if self.m == float('inf'):
+            return[[320, 540], [320, 740]]
+        
         A = (1 / self.a**2) + (self.m**2 / self.b**2)
         B = (2 * self.m * (self.c - self.k) / self.b**2) - (2 * self.h / self.a**2)
         C = ((self.h**2) / self.a**2) + ((self.c - self.k)**2 / self.b**2) - 1
-
+        
         # D = b^2 - 4ac
         discriminant = B**2 - 4 * A * C
 
@@ -56,7 +59,6 @@ class GetIntersection:
         elif x2 > 0 and y2 > 0 or x2 < 0 and y2 > 0:
             self.upper_point = (x2, y2)
 
-        
         return [[x1, y1], [x2, y2]]
 
     def filter_valid_points(self, points, width, height):
@@ -65,12 +67,12 @@ class GetIntersection:
             (int(x), int(y)) for x, y in points
             if 0 <= x <= width and 0 <= y <= height
         ]
-        
+        # print(f"valid_p: {valid_points}")
         return valid_points
 
 
 ## main ##
-video_path = './data/video_output6.mp4'
+video_path = './asap/data/video_output7.mp4'
 
 unit = Conversion(1920, 1080, 16.1)
 
@@ -89,12 +91,13 @@ fps = cap.get(cv2.CAP_PROP_FPS)
 
 """generate instance"""
 intersection_finder = GetIntersection(ellipse_center, ellipse_axes)
-target_point_x = np.random.randint(640)
-target_point_y = np.random.randint(640)
-
+target_point_x = 0
+target_point_y = 0
 while True:
-    target_point_x = 600
-    target_point_y = 600
+    # target_point_x = np.random.randint(640)
+    # target_point_y = np.random.randint(640)
+
+    target_point_x += 1
     dynamic_point = (target_point_x, target_point_y)
     intersection_finder.set_dynamic_line(dynamic_point)
 
@@ -107,7 +110,7 @@ while True:
     
     frame_resized = cv2.resize(frame, (640, 640))
     
-    cv2.ellipse(frame_resized, ellipse_center, ellipse_axes, 0, 0, 360, (0, 0, 0), 2)
+    cv2.ellipse(frame_resized, ellipse_center, ellipse_axes, 0, 0, 360, (150, 150, 150), 1)
 
     cv2.circle(frame_resized, standard_point, 5, (0, 0, 255), -1, cv2.LINE_AA)
 
