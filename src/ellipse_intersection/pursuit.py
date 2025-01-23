@@ -1,6 +1,27 @@
 import cv2
 import numpy as np
+from ultralytics import YOLO
+import torch 
+import torch.nn as nn
+import logging
 
+# YOLO verbose False 적용
+logging.getLogger("ultralytics").setLevel(logging.ERROR)
+
+
+
+"""
+| AI Server |
+VideoProcessor
+Conversion
+Centroid
+GetIntersection
+"""
+
+"""
+To get 'slope coef',
+you should import pursuit and use VideoProcessor object cuz it returns slope parameters.
+"""
 class Conversion:
     def __init__(self, w_res, h_res, inch):
         self.__w_res = w_res
@@ -9,15 +30,11 @@ class Conversion:
 
         self.__PPI = np.sqrt(np.power(self.__w_res, 2)+np.power(self.__h_res, 2))/self.__inch
 
+        self.x = 0
+        self.y = 0
+
     def p2cm(self):
         return  2.54 / self.__PPI
-
-                        
-class GetIntersection:
-    def __init__(self, ellipse_center, ellipse_axes):
-        self.h, self.k = ellipse_center  
-        self.a, self.b = ellipse_axes   
-        self.fixed_point = (320, 640) # center of a frame
 
     def set_dynamic_line(self, target_point):
         x0, y0 = self.fixed_point
@@ -31,6 +48,137 @@ class GetIntersection:
         
         # y_intersection
         self.c = y0 - self.m * x0
+
+class VideoProcessor:
+    def __init__(self, video_path, model):
+        self.video_path = video_path
+        self.model = model
+
+        self.unit = Conversion(1920, 1080, 16.1)
+
+        self.ellipse_center = (320, 640)  # 타원의 중심
+        self.ellipse_axes = (320, 100)    # 타원의 반지름 (a, b)
+        
+        self.center = Centroid()
+        self.slope = 0.0
+
+    def process_video(self):
+        cap = cv2.VideoCapture(self.video_path)
+        standard_point = (320, 540)
+
+        if not cap.isOpened():
+            print("Error: Couldn't open the video file.")
+            exit()
+
+        fps = cap.get(cv2.CAP_PROP_FPS)
+
+        intersection_finder = GetIntersection(self.ellipse_center, self.ellipse_axes)
+
+        while True:
+
+            dynamic_point = (self.center.centroid_x, self.center.centroid_y)
+            intersection_finder.set_dynamic_line(dynamic_point)
+
+            ret, frame = cap.read()
+            frame = cv2.rotate(frame, cv2.ROTATE_180)
+            
+            if not ret:
+                print("Error: Couldn't read a frame.")
+                break
+            
+            frame_resized = cv2.resize(frame, (640, 640))
+            
+            results = self.model.predict(frame_resized)
+            
+            for result in results:
+                boxes = result.boxes.xyxy.cpu().numpy()
+                classes = result.boxes.cls.cpu().numpy()
+                """
+                cls_id = {0: center, 1: right, 2: left, 7: safety zone}
+                """
+                masks = result.masks.xy if result.masks else None
+                # print(classes)
+
+                if masks != None:
+                    prev_masks = masks
+                    for cls_id, mask in zip(classes, masks):
+                        if cls_id == 0:
+                            # print(f"Class: {model.names[int(cls_id)]}")
+                            self.center.get_centroid(mask)
+
+                else:
+                    for mask in prev_masks:
+                        self.center.get_centroid(mask)
+
+
+            annotated_frame = results[0].plot(boxes=False)
+
+            cv2.ellipse(annotated_frame, self.ellipse_center, self.ellipse_axes, 0, 0, 360, (150, 150, 150), 1)
+
+            cv2.circle(annotated_frame, standard_point, 5, (0, 0, 255), -1, cv2.LINE_AA)
+
+            points = intersection_finder.calculate_intersection()
+            
+            if points:
+                valid_points = intersection_finder.filter_valid_points(points, 640, 640)
+                for point in valid_points:
+                    cv2.circle(annotated_frame, point, 5, (0, 255, 0), -1, cv2.LINE_AA)
+                
+                    if (640-point[0])*(self.unit.p2cm()) < 320*self.unit.p2cm():
+                        self.x = -(320 - point[0])*self.unit.p2cm()
+                    else:
+                        self.x = (point[0] - 320)*self.unit.p2cm()
+
+                self.y = (640-point[1])*self.unit.p2cm()*7.5
+
+            self.slope = np.arctan(self.x/(0.396*self.y+6.3)) if point[1] != 0 else np.arctan(self.x)
+                    
+            self.slope = np.degrees(self.slope)
+            
+            cv2.imshow('center_pursuit', annotated_frame)
+            
+            delay = int(1000 / fps) # original fps
+            
+            if cv2.waitKey(delay) & 0xFF == ord('q'):
+                break
+
+class Centroid():
+    def __init__(self):
+        self.centroid_x, self.centroid_y = 0, 0
+
+    def get_centroid(self, polygon):
+        area = 0
+        self.centroid_x = 0
+        self.centroid_y = 0
+        n = len(polygon)
+
+        for i in range(n):
+            j = (i + 1) % n
+            factor = polygon[i][0] * polygon[j][1] - polygon[j][0] * polygon[i][1]
+            area += factor
+            self.centroid_x += (polygon[i][0] + polygon[j][0]) * factor
+            self.centroid_y += (polygon[i][1] + polygon[j][1]) * factor
+        area /= 2.0
+        if area != 0:
+            self.centroid_x /= (6 * area)
+            self.centroid_y /= (6 * area)
+
+class GetIntersection:
+    def __init__(self, ellipse_center, ellipse_axes):
+        self.h, self.k = ellipse_center  
+        self.a, self.b = ellipse_axes   
+        self.fixed_point = (320, 640) # center of a frame
+
+    def set_dynamic_line(self, target_point):
+        x0, y0 = self.fixed_point
+        x1, y1 = target_point
+
+        # slope
+        self.m = (y1 - y0) / (x1 - x0) if x1 != x0 else float('inf')  # x1 == x0일 경우 수직선
+        
+        # y_intersection
+        self.c = y0 - self.m * x0
+
 
     def calculate_intersection(self):
         """get an intersection"""
@@ -71,76 +219,14 @@ class GetIntersection:
         return valid_points
 
 
-## main ##
-video_path = './asap/data/video_output7.mp4'
 
-unit = Conversion(1920, 1080, 16.1)
 
-ellipse_center = (320, 640)  # 타원의 중심
-ellipse_axes = (320, 100)    # 타원의 반지름 (a, b)
 
-cap = cv2.VideoCapture(video_path)
-standard_point = (320, 540)
-pursuit_point = (500, 540)
+if __name__ == "__main__":
+    video_path = '/home/ms/Downloads/video_output5.mp4'
+    checkpoint_path = '/home/ms/Downloads/best.pt'
 
-if not cap.isOpened():
-    print("Error: Couldn't open the video file.")
-    exit()
+    model = YOLO(checkpoint_path, verbose=False)
 
-fps = cap.get(cv2.CAP_PROP_FPS)
-
-"""generate instance"""
-intersection_finder = GetIntersection(ellipse_center, ellipse_axes)
-target_point_x = 0
-target_point_y = 0
-while True:
-    # target_point_x = np.random.randint(640)
-    # target_point_y = np.random.randint(640)
-
-    target_point_x += 1
-    dynamic_point = (target_point_x, target_point_y)
-    intersection_finder.set_dynamic_line(dynamic_point)
-
-    ret, frame = cap.read()
-    frame = cv2.rotate(frame, cv2.ROTATE_180)
-    
-    if not ret:
-        print("Error: Couldn't read a frame.")
-        break
-    
-    frame_resized = cv2.resize(frame, (640, 640))
-    
-    cv2.ellipse(frame_resized, ellipse_center, ellipse_axes, 0, 0, 360, (150, 150, 150), 1)
-
-    cv2.circle(frame_resized, standard_point, 5, (0, 0, 255), -1, cv2.LINE_AA)
-
-    points = intersection_finder.calculate_intersection()
-    if points:
-        valid_points = intersection_finder.filter_valid_points(points, 640, 640)
-        for point in valid_points:
-            cv2.circle(frame_resized, point, 5, (0, 255, 0), -1, cv2.LINE_AA)
-        
-        if (640-point[0])*(unit.p2cm()) < 320*unit.p2cm():
-            x = -(320 - point[0])*unit.p2cm()
-        else:
-            x = (point[0] - 320)*unit.p2cm()
-
-        y = (640-point[1])*unit.p2cm()*7.5
-
-        print(f"x: {x:.2f}, y: {y:.2f}")
-
-    slope = np.arctan(x/(0.396*y+6.3)) if point[1] != 0 else np.arctan(x)
-            
-    slope = np.degrees(slope)
-    print(f"steering angle: {slope:.2f}'")
-    
-    cv2.imshow('center_pursuit', frame_resized)
-    
-    delay = int(1000 / fps) # original fps
-    
-    if cv2.waitKey(delay) & 0xFF == ord('q'):
-        break
-
-cap.release()
-
-cv2.destroyAllWindows()
+    processor = VideoProcessor(video_path, model)
+    processor.process_video()

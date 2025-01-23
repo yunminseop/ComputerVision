@@ -59,3 +59,11 @@ print("Camera Matrix:")
 print(camera_matrix)
 print("\nDistortion Coefficients:")
 print(dist_coeffs)
+
+"""
+
+What is Intrinsic Parameter?
+
+카메라가 이미지를 왜곡시키는 과정에서 발생하는 왜곡 계수.
+
+"""
