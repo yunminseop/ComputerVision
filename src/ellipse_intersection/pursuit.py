@@ -4,6 +4,7 @@ from ultralytics import YOLO
 import torch 
 import torch.nn as nn
 import logging
+import gc
 
 # YOLO verbose False 적용
 logging.getLogger("ultralytics").setLevel(logging.ERROR)
@@ -36,19 +37,6 @@ class Conversion:
     def p2cm(self):
         return  2.54 / self.__PPI
 
-    def set_dynamic_line(self, target_point):
-        x0, y0 = self.fixed_point
-        x1, y1 = target_point
-
-        if y1 >= 640:
-            y1 = 639
-            
-        # slope
-        self.m = (y1 - y0) / (x1 - x0) if x1 != x0 else float('inf')  # x1 == x0일 경우 수직선
-        
-        # y_intersection
-        self.c = y0 - self.m * x0
-
 class VideoProcessor:
     def __init__(self, video_path, model):
         self.video_path = video_path
@@ -76,9 +64,6 @@ class VideoProcessor:
 
         while True:
 
-            dynamic_point = (self.center.centroid_x, self.center.centroid_y)
-            intersection_finder.set_dynamic_line(dynamic_point)
-
             ret, frame = cap.read()
             frame = cv2.rotate(frame, cv2.ROTATE_180)
             
@@ -105,11 +90,13 @@ class VideoProcessor:
                         if cls_id == 0:
                             # print(f"Class: {model.names[int(cls_id)]}")
                             self.center.get_centroid(mask)
+                elif prev_masks:
+                            for cls_id, mask in zip(classes, prev_masks):
+                                if cls_id == 0:
+                                    self.center.get_centroid(mask)
 
-                else:
-                    for mask in prev_masks:
-                        self.center.get_centroid(mask)
-
+            dynamic_point = (self.center.centroid_x, self.center.centroid_y)
+            intersection_finder.set_dynamic_line(dynamic_point)
 
             annotated_frame = results[0].plot(boxes=False)
 
@@ -134,14 +121,45 @@ class VideoProcessor:
             self.slope = np.arctan(self.x/(0.396*self.y+6.3)) if point[1] != 0 else np.arctan(self.x)
                     
             self.slope = np.degrees(self.slope)
+            print(self.slope)
             
+            x, z = self.Calculate(self.slope)
+
+            # if z == 0.5784577935329023:
+            #     cv2.imwrite("gimochi4.jpg", frame_resized)
+            #     break
+
+            print(x, z)
+
             cv2.imshow('center_pursuit', annotated_frame)
             
             delay = int(1000 / fps) # original fps
             
+            del frame
+            gc.collect()
+
             if cv2.waitKey(delay) & 0xFF == ord('q'):
                 break
 
+
+    def Calculate(self, slope):
+            x = 0.29
+            if -45.0 <= slope <= 0.0:
+                # -45.0~0.0 -> 0.65~0.79
+                source_min, source_max = -45.0, 0.0
+                target_min, target_max = 0.79, 0.65
+            elif 0.0 <= slope <= 45.0:
+                # 0.0~45.0 -> 0.56~0.77
+                source_min, source_max = 0.0, 45.0
+                target_min, target_max = 0.56, 0.77
+            else:
+                raise ValueError("slope out of range: must be between -45.0 and 45.0")
+            
+            # 정규화 공식 적용
+            z = target_min + (slope - source_min) * (target_max - target_min) / (source_max - source_min)
+                
+            return (x, z)
+    
 class Centroid():
     def __init__(self):
         self.centroid_x, self.centroid_y = 0, 0

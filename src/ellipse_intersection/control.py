@@ -12,8 +12,6 @@ class Control(VideoProcessor):
     def __init__(self, video_path, model):
         super().__init__(video_path=video_path, model=model)
     
-    def steering(self, slope):
-        print(slope)
 
 
 
