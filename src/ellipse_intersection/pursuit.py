@@ -7,7 +7,7 @@ class Conversion:
         self.__h_res = h_res
         self.__inch = inch
 
-        self.__PPI = np.sqrt(np.pow(self.__w_res, 2)+np.pow(self.__h_res, 2))/self.__inch
+        self.__PPI = np.sqrt(np.power(self.__w_res, 2)+np.power(self.__h_res, 2))/self.__inch
 
     def p2cm(self):
         return  2.54 / self.__PPI
@@ -35,6 +35,10 @@ class GetIntersection:
 
     def calculate_intersection(self):
         """get an intersection"""
+
+        if self.m == float('inf'):
+            return[[320, 540], [320, 740]]
+        
         A = (1 / self.a**2) + (self.m**2 / self.b**2)
         B = (2 * self.m * (self.c - self.k) / self.b**2) - (2 * self.h / self.a**2)
         C = ((self.h**2) / self.a**2) + ((self.c - self.k)**2 / self.b**2) - 1
@@ -70,7 +74,7 @@ class GetIntersection:
 
 
 ## main ##
-video_path = './data/video_output6.mp4'
+video_path = 'video_output6.mp4'
 
 unit = Conversion(1920, 1080, 16.1)
 
@@ -93,8 +97,8 @@ target_point_x = np.random.randint(640)
 target_point_y = np.random.randint(640)
 
 while True:
-    target_point_x = 600
-    target_point_y = 600
+    target_point_x = 640
+    target_point_y = 640
     dynamic_point = (target_point_x, target_point_y)
     intersection_finder.set_dynamic_line(dynamic_point)
 
@@ -107,7 +111,7 @@ while True:
     
     frame_resized = cv2.resize(frame, (640, 640))
     
-    cv2.ellipse(frame_resized, ellipse_center, ellipse_axes, 0, 0, 360, (0, 0, 0), 2)
+    cv2.ellipse(frame_resized, ellipse_center, ellipse_axes, 0, 0, 360, (200, 200, 200), 1)
 
     cv2.circle(frame_resized, standard_point, 5, (0, 0, 255), -1, cv2.LINE_AA)
 
