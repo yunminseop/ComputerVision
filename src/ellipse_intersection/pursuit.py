@@ -4,6 +4,7 @@ from ultralytics import YOLO
 import torch 
 import torch.nn as nn
 import logging
+import math
 import gc
 import matplotlib.pyplot as plt
 from matplotlib.patches import Polygon
@@ -89,15 +90,17 @@ class VideoProcessor:
                         """ classes = [cls_id[0], cls_id[1], cls_id[2], ... ]
                             masks = [mask[0], mask[1], mask[2], ... ]
                                     mask[0] = [[20.2, 428.5], [167.0, 39.4], [420.7, 350.9], ...] (polygon)"""
-
+                        
                         for cls_id, mask in zip(classes, masks):
                             if cls_id == 0:
                                     # print(f"Class: {self.model.names[int(cls_id)]}")
+                                    # mask_renewal = self.filter_polygon_by_x(mask)
                                     self.destination = mask
                                 
                     elif prev_masks:
                                 for cls_id, mask in zip(classes, prev_masks):
                                     if cls_id == 0:
+                                        # mask_renewal = self.filter_polygon_by_x(mask)
                                         self.destination = mask
 
 
@@ -105,10 +108,12 @@ class VideoProcessor:
 
                     annotated_frame = results[0].plot(boxes=False)
                     
-            processor = PurePursuit(self.destination)
-            bezier_points = processor.get_bezier_points(self.car_position, (self.center.centroid_x, self.center.centroid_y))
+            processor = PurePursuit(self.destination, self.lookahead_distance)
+            
+            lookahead_distance, bezier_points = processor.get_bezier_points(self.car_position, (self.center.centroid_x, self.center.centroid_y))
+
             bezier_path = processor.bezier_curve(bezier_points)
-            lookahead_point = processor.find_lookahead_point(bezier_path, self.car_position, self.lookahead_distance)
+            lookahead_point = processor.find_lookahead_point(bezier_path, self.car_position, lookahead_distance)
             
             ax.clear()
             polygon = Polygon(self.destination, closed=True, edgecolor='r', facecolor='none', linewidth=1, label="Lane Edge")
@@ -142,8 +147,9 @@ class VideoProcessor:
         plt.show()
 
 class PurePursuit():
-    def __init__(self, lane_polygon):
+    def __init__(self, lane_polygon, lookahead_distance):
         self.lane_polygon = lane_polygon
+        self.lookahead_distance = lookahead_distance
 
     def get_bezier_points(self, car_position, centroid):
         
@@ -155,22 +161,39 @@ class PurePursuit():
 
         if dist > 0:
             trans_polygon[:, 1] += int(dist)
+
+            
         else:
             trans_polygon[:, 1] -= int(dist)
+        
+        
+        if 0 <= np.abs(dist) <= 100:
+            """ dist가 100이면 lah_d+=50
+                dist가 50이면 lah_d+=100
+                즉, 무게중심과 edge간 거리가 가까워질수록 lah_d는 비례증가"""
+            self.lookahead_distance += (100 - np.abs(dist))
+        
 
         sort_index = np.argsort(trans_polygon[:, 1])
         y_max = trans_polygon[sort_index[0]]
 
-        """ car_position ~ centroid"""
-        mid_control1 = (car_position[0]-(car_position[0] - centroid[0]) / 3, 1000 - ((car_position[1] - centroid[1]) * 5 / 10))
-        mid_control2 = (car_position[0]-(car_position[0] - centroid[0]) * 2 / 3, 1000- ((car_position[1] - centroid[1]) * 8 / 10))
+        if dist < 100:
+            """ car_position ~ centroid"""
+            mid_control1 = (car_position[0]-(car_position[0] - centroid[0]) / 3, 1000 - ((car_position[1] - centroid[1]) * 5 / 10))
+            mid_control2 = (car_position[0]-(car_position[0] - centroid[0]) * 2 / 3, 1000- ((car_position[1] - centroid[1]) * 8 / 10))
 
-        """ centroid ~ y_max"""
-        mid_control3 = (centroid[0]-(centroid[0] - y_max[0]) / 3, centroid[1] - ((centroid[1] - y_max[1]) * 5 / 10))
-        mid_control4 = (centroid[0]-(centroid[0] - y_max[0]) * 2 / 3, centroid[1]- ((centroid[1] - y_max[1]) * 8 / 10))
-        
-        return (car_position, mid_control1, mid_control2, mid_control3, mid_control4, y_max)
+            """ centroid ~ y_max"""
+            mid_control3 = (centroid[0]-(centroid[0] - y_max[0]) / 3, centroid[1] - ((centroid[1] - y_max[1]) * 5 / 10))
+            mid_control4 = (centroid[0]-(centroid[0] - y_max[0]) * 2 / 3, centroid[1]- ((centroid[1] - y_max[1]) * 8 / 10))
+            
+            return (self.lookahead_distance, (car_position, mid_control1, mid_control2, mid_control3, mid_control4, y_max))
+        else:
+            """ car_position ~ centroid"""
+            mid_control1 = (car_position[0]-(car_position[0] - centroid[0]) / 3, 1000 - ((car_position[1] - centroid[1]) * 5 / 10))
+            mid_control2 = (car_position[0]-(car_position[0] - centroid[0]) * 2 / 3, 1000- ((car_position[1] - centroid[1]) * 8 / 10))
+            return (self.lookahead_distance, (car_position, mid_control1, mid_control2, centroid)) 
 
+            
 
     def bezier_curve(self, bezier_points, num_points=100):
         n = len(bezier_points) - 1
